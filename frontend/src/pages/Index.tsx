@@ -28,7 +28,7 @@ export default function Index() {
         <button onClick={() => setActiveTab('home')} className="max-w-6xl mx-auto flex items-center gap-3 text-left">
           <LogoMark size={38} className="drop-shadow-[0_4px_10px_rgba(37,99,235,0.45)]" />
           <div>
-            <h1 className="text-base leading-tight"><Wordmark /></h1>
+            <h1 className="text-base leading-tight"><Wordmark /> <span className="text-cyan-300 font-semibold">Civic Plus</span></h1>
             <p className="text-xs text-blue-200/70 leading-tight">AI Civic Copilot · Built for Bengaluru</p>
           </div>
         </button>

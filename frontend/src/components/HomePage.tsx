@@ -63,7 +63,7 @@ export default function HomePage({ onLaunch, onItinerary }: Props) {
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
           <div className="flex items-center gap-3 mb-5">
             <LogoMark size={60} className="drop-shadow-[0_8px_24px_rgba(37,99,235,0.55)]" />
-            <Wordmark className="text-3xl" />
+            <div className="flex items-baseline gap-2"><Wordmark className="text-3xl" /><span className="text-xl md:text-2xl font-semibold text-cyan-300">Civic Plus</span></div>
           </div>
             <span className="inline-flex items-center gap-2 rounded-full bg-white/10 border border-white/15 px-3 py-1 text-xs font-medium text-cyan-200">
             <Sparkles className="w-3.5 h-3.5" /> Built for IBM Bobathon · Smarter Streets, Better Living
