@@ -191,6 +191,10 @@
   line-height: 1.4 !important;
 }
 
+.civic-popup { color: #f8fafc !important; }
+.civic-popup b { color: #ffffff !important; }
+.civic-popup p { color: #dbeafe !important; }
+
 .leaflet-popup-close-button {
   color: #bfdbfe !important;
   padding: 8px !important;
@@ -220,3 +224,5 @@
 .leaflet-tooltip-bottom.lookate-tip::before { border-bottom-color: rgba(15, 23, 42, 0.95); }
 .leaflet-tooltip-left.lookate-tip::before { border-left-color: rgba(15, 23, 42, 0.95); }
 .leaflet-tooltip-right.lookate-tip::before { border-right-color: rgba(15, 23, 42, 0.95); }
+html, body, #root { min-height: 100%; }
+body { margin: 0; overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }

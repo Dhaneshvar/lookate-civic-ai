@@ -7,6 +7,7 @@ import json
 import time
 import base64
 import logging
+import uuid
 from datetime import datetime
 from urllib.parse import quote
 
@@ -28,15 +29,161 @@ logger = logging.getLogger(__name__)
 # Runtime configuration store
 CONFIG = {
     "SERPAPI_KEY": os.getenv("SERPAPI_KEY", ""),
-    "DEFAULT_LAT": 11.9416,     # Pondicherry default
-    "DEFAULT_LNG": 79.8083,
-    "DEFAULT_CITY": "Pondicherry"
+        "DEFAULT_LAT": 12.9716,     # Bengaluru fallback when GPS is unavailable
+        "DEFAULT_LNG": 77.5946,
+        "DEFAULT_CITY": "Bengaluru"
 }
 
 # In-memory store for active locations and route
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
 os.makedirs(STATIC_DIR, exist_ok=True)
 LOCATIONS_FILE = os.path.join(STATIC_DIR, 'locations.json')
+CIVIC_INCIDENTS_FILE = os.path.join(STATIC_DIR, 'civic_incidents.json')
+
+DEPARTMENT_MAP = {
+    "pothole": "BBMP Road Infrastructure",
+    "road_damage": "BBMP Road Infrastructure",
+    "garbage": "BBMP Solid Waste Management",
+    "water_leak": "BWSSB Water Supply",
+    "flooding": "BBMP Storm Water Drainage",
+    "streetlight": "BBMP Electrical / BESCOM",
+    "traffic_hazard": "Bengaluru Traffic Police",
+    "blocked_footpath": "BBMP Urban Roads",
+    "other": "BBMP Citizen Grievance Cell",
+}
+STATE_CIVIC_PORTALS = {
+    'Karnataka': {'code': 'KA', 'authority': 'BBMP / Karnataka civic services', 'portal': 'https://www.bbmp.gov.in/'},
+    'Puducherry': {'code': 'PY', 'authority': 'Government of Puducherry', 'portal': 'https://py.gov.in/'},
+    'Tamil Nadu': {'code': 'TN', 'authority': 'Tamil Nadu civic services', 'portal': 'https://www.tn.gov.in/'},
+    'default': {'code': 'IN', 'authority': 'Local civic grievance authority', 'portal': 'https://pgportal.gov.in/'}
+}
+
+def _reverse_location(lat, lng):
+    """Resolve the submitted coordinates server-side so stale UI labels cannot misroute a report."""
+    try:
+        result = requests.get(
+            'https://nominatim.openstreetmap.org/reverse',
+            params={'format': 'jsonv2', 'lat': lat, 'lon': lng, 'zoom': 18, 'addressdetails': 1},
+            headers={'User-Agent': 'LookAte-Civic-Plus/1.0 civic-reporting-demo'}, timeout=8)
+        result.raise_for_status()
+        address = result.json().get('address') or {}
+        state = address.get('state') or address.get('state_district')
+        city = address.get('city') or address.get('town') or address.get('municipality') or address.get('village')
+        area = address.get('suburb') or address.get('neighbourhood') or address.get('quarter') or address.get('road')
+        return {
+            'area': area, 'city': city, 'state': state, 'postcode': address.get('postcode'),
+            'label': ' · '.join(x for x in [area, city, state, address.get('postcode')] if x)
+        }
+    except Exception as exc:
+        logger.warning('Reverse geocoding failed: %s', exc)
+        return {}
+
+def _state_from_coordinates(lat, lng, location):
+    state_text = (location.get('state') or '').lower()
+    for name in STATE_CIVIC_PORTALS:
+        if name != 'default' and name.lower() in state_text:
+            return name
+    if 11.7 <= lat <= 12.2 and 79.5 <= lng <= 80.2:
+        return 'Puducherry'
+    if 11.5 <= lat <= 18.5 and 74 <= lng <= 79.5:
+        return 'Karnataka'
+    return None
+
+def _load_civic_incidents():
+    try:
+        with open(CIVIC_INCIDENTS_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+def _save_civic_incidents(items):
+    with open(CIVIC_INCIDENTS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(items[-500:], f, indent=2, ensure_ascii=False)
+
+def _fallback_civic_classification(message):
+    text = (message or '').lower()
+    issue = 'other'
+    for key, words in {
+        'pothole': ['pothole', 'crater', 'road damage'],
+        'garbage': ['garbage', 'waste', 'dump', 'litter', 'trash'],
+        'water_leak': ['leak', 'burst pipe', 'water flowing'],
+        'flooding': ['flood', 'waterlogging', 'water logged', 'drain overflow'],
+        'streetlight': ['streetlight', 'street light', 'dark road', 'lamp'],
+        'traffic_hazard': ['traffic', 'accident', 'dangerous crossing'],
+        'blocked_footpath': ['footpath', 'sidewalk', 'pavement'],
+    }.items():
+        if any(word in text for word in words):
+            issue = key
+            break
+    risk = 'high' if issue in ('pothole', 'flooding', 'traffic_hazard', 'water_leak') else 'medium'
+    return {
+        'issue_type': issue, 'issue_label': issue.replace('_', ' ').title(),
+        'risk': risk, 'confidence': 0.62, 'summary': message or 'Civic issue reported from citizen photo',
+        'safety_advice': 'Keep a safe distance and avoid the affected area until it is inspected.'
+    }
+
+def _send_civic_whatsapp(incident):
+    """Best-effort automatic citizen notification after report creation."""
+    sid = os.getenv('TWILIO_ACCOUNT_SID', '').strip()
+    token = os.getenv('TWILIO_AUTH_TOKEN', '').strip()
+    recipient = os.getenv('TWILIO_WHATSAPP_TO', '').strip()
+    sender = os.getenv('TWILIO_WHATSAPP_FROM', 'whatsapp:+14155238886').strip()
+    if not (sid and token and recipient):
+        return {'status': 'not_configured'}
+    if not recipient.startswith('whatsapp:'):
+        recipient = 'whatsapp:' + recipient
+    progress_url = (incident.get('progress_url') or os.getenv('LOOKATE_PUBLIC_URL', 'http://localhost:5173') + '/?incident=') + incident['id']
+    body = (f"LOOKATE CIVIC PLUS — REPORT RECEIVED\n\nIncident number: {incident['id']}\n"
+            f"Reported: {incident.get('reported_at', incident.get('created_at'))}\n"
+            f"Location: {incident['address']}\nIssue: {incident['issue_label']}\n"
+            f"Risk: {incident['risk'].upper()}\nDepartment: {incident['department']}\n"
+            f"State authority portal: {incident.get('civic_portal', 'Not available')}\n"
+            f"Status: {incident['status']}\n\nWhat we detected: {incident['summary']}\n"
+            f"What happens next: {incident.get('next_action')}\n\nSafety advice: {incident['safety_advice']}\n"
+            f"\nTrack progress: {progress_url}\nReply FOLLOW UP {incident['id']} for an update.")
+    try:
+        import base64
+        auth = base64.b64encode(f'{sid}:{token}'.encode()).decode()
+        response = requests.post(
+            f'https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json',
+            headers={'Authorization': f'Basic {auth}'},
+            data={'From': sender, 'To': recipient, 'Body': body}, timeout=15)
+        if not response.ok:
+            logger.warning('WhatsApp notification failed: %s', response.text[:300])
+            return {'status': 'failed', 'code': response.status_code}
+        return {'status': 'sent', 'sid': response.json().get('sid')}
+    except Exception as exc:
+        logger.warning('WhatsApp notification error: %s', exc)
+        return {'status': 'failed'}
+
+def _send_civic_status_whatsapp(incident, status, note):
+    """Notify the citizen when an officer changes the incident status."""
+    sid = os.getenv('TWILIO_ACCOUNT_SID', '').strip()
+    token = os.getenv('TWILIO_AUTH_TOKEN', '').strip()
+    recipient = os.getenv('TWILIO_WHATSAPP_TO', '').strip()
+    sender = os.getenv('TWILIO_WHATSAPP_FROM', 'whatsapp:+14155238886').strip()
+    if not (sid and token and recipient):
+        return {'status': 'not_configured'}
+    if not recipient.startswith('whatsapp:'):
+        recipient = 'whatsapp:' + recipient
+    progress_url = (incident.get('progress_url') or os.getenv('LOOKATE_PUBLIC_URL', 'http://localhost:5173') + '/?incident=') + incident['id']
+    body = (f"LOOKATE CIVIC PLUS — STATUS UPDATE\n\nIncident: {incident['id']}\n"
+            f"Issue: {incident['issue_label']}\nLocation: {incident['address']}\n"
+            f"Department: {incident['department']}\n\nAction taken: {status}\n"
+            f"Officer update: {note or 'The response team updated this incident.'}\n"
+            f"Next step: {'Field work or verification is in progress.' if status == 'In Progress' else 'The department will continue the response workflow.'}\n"
+            f"Track progress: {progress_url}\nState portal: {incident.get('civic_portal', 'Not available')}")
+    try:
+        import base64
+        auth = base64.b64encode(f'{sid}:{token}'.encode()).decode()
+        response = requests.post(f'https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json', headers={'Authorization': f'Basic {auth}'}, data={'From': sender, 'To': recipient, 'Body': body}, timeout=15)
+        if not response.ok:
+            logger.warning('Status WhatsApp failed: %s', response.text[:300])
+            return {'status': 'failed', 'code': response.status_code}
+        return {'status': 'sent', 'sid': response.json().get('sid')}
+    except Exception as exc:
+        logger.warning('Status WhatsApp error: %s', exc)
+        return {'status': 'failed'}
 
 # -------------------------------------------------------------
 # Curated Real-World Discovery Database (Fallback / Demo Data)
@@ -649,33 +796,30 @@ def get_locations():
 # -------------------------------------------------------------
 # AI Concierge - Azure OpenAI with SerpApi tool calling
 # -------------------------------------------------------------
-SYSTEM_PROMPT = """You are LookAte, a warm and genuinely knowledgeable AI travel concierge for India-focused travel and local discovery.
+SYSTEM_PROMPT = """You are LookAte Civic AI, a warm and action-oriented civic assistant for Bengaluru.
 
 You have tools backed by live Google data from SerpApi:
-- search_places: find real places (Google Maps: cafes, restaurants, attractions, shops, hospitals...) near the user.
-- get_directions: distance and travel time from the user's location to a named place.
-- optimize_itinerary: resolve a list of stops to real places and put them in the most efficient visiting order, with distance and time.
-- search_images: Google Images photos of a dish, place or thing, shown to the user as a photo strip.
-- tripadvisor_search: Tripadvisor listings with ratings and review counts for restaurants, hotels and things to do.
-- web_answer: a Google AI Mode answer with sources, for general travel or food knowledge (best season, what a dish is, local tips, entry fees).
+- search_places: find real roads, landmarks, hospitals, police stations, civic offices and nearby services.
+- get_directions: distance and travel time, especially for safer alternate routes around a civic hazard.
+- web_answer: grounded civic information, department guidance and public safety instructions.
 
 The user may have a saved itinerary (their to-do list of places), shown at the end of these instructions. Treat it as input: you can discuss it, check it, extend it and optimize it.
 
 How to work:
-- When the user wants to plan, order, optimize or "sort out" a list of places, call optimize_itinerary. If they list places in their message, pass those as stops. If they refer to "my itinerary" or "my plan" without listing places, call it with no stops and it will use their saved itinerary. Then present the final order with the total distance and time.
-- If the user shares a photo, first work out what it shows. Food or a drink: name the dish, cuisine and two or three key ingredients, be honest when unsure (give your best guess and one alternative), then call search_places with the dish name (for example 'masala dosa restaurants') to find nearby places that serve it. A landmark, building or shop front: name it, then use web_answer and/or search_places to give facts and show it on the map. A menu, sign or label: read it and translate or explain it. Anything else: say briefly what you see and ask what they would like to find.
-- Use search_images when the user wants to see what something looks like, or when photos would help confirm a dish or place. Use tripadvisor_search when reviews, rankings or ratings matter; its results have no map coordinates, so to show a Tripadvisor place on the map also call search_places with its name. Use web_answer for general knowledge that is not about finding specific nearby places, and include the city in the question when the answer depends on location. You may combine tools in one turn (for example search_places plus search_images).
+- Civic Plus is the submission workflow: when the user wants to formally report a photo, use the Civic Plus tab so the incident number, map pin and department routing are recorded.
+- In Civic AI, help the user understand an issue, identify the likely department, check nearby incidents, get safety advice and find a safer route.
+- If the user shares a photo, identify likely civic hazards such as potholes, garbage, flooding, water leaks, streetlight failures, traffic hazards or blocked footpaths. Be honest about uncertainty and tell the user to submit through Civic Plus for official tracking.
+- Use web_answer for public civic guidance and search_places for nearby emergency services, civic offices and safe alternatives.
 - Photos, review cards and source links returned by tools are shown to the user automatically, so never paste URLs or link lists in your reply. Summarize what the tools found in natural language.
-- When looking at an itinerary, if a stop looks closed, poorly rated or awkwardly far from the rest, offer a better alternative by calling search_places for something similar nearby.
-- Call search_places whenever the user wants to find, discover, compare or be recommended places. Use a focused query. You may call it again with a different query if the first results do not fit.
+- Call search_places whenever the user needs a nearby service, civic office, emergency service or safer alternative. Use a focused query.
 - Call get_directions when the user asks how to get somewhere, how far it is, or how long it takes.
 - Do not call tools for greetings, thanks, or questions you can answer from the conversation or from the places already on the map.
 - For specifics (names, ratings, addresses, opening status, distance, time) use ONLY what the tools returned. Never invent a venue, rating, address, phone number or opening hour.
-- Whatever places the tools return are plotted on the user's map in the order returned, so refer to them by their exact names, in that order, and say briefly why each is worth visiting.
+- Whatever places the tools return are plotted on the user's map; refer to them by their exact names and explain their civic relevance.
 - If a tool result has source "demo", say once, briefly, that these are sample listings because live Google Maps data is unavailable right now.
 - If a tool returns nothing, say so honestly and suggest a different search.
 - Keep it tight: 3-6 sentences. Use short markdown bullets only when listing options.
-- If the question is unrelated to travel or local discovery, say what you can help with in one line and offer a travel alternative.
+- If the question is unrelated to civic issues, say what you can help with in one line and point the user to Civic Plus for formal reporting.
 - Never say you are an AI model. Just be helpful.
 
 Formatting: plain markdown. No HTML."""
@@ -1380,6 +1524,138 @@ def ai_chat():
     except Exception as e:
         logger.error(f"Chat endpoint error: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/civic/incidents', methods=['GET'])
+def civic_incidents():
+    """Return the incident board for the Civic Pulse dashboard."""
+    return jsonify({'success': True, 'incidents': list(reversed(_load_civic_incidents()))})
+
+@app.route('/api/civic/report', methods=['POST'])
+def civic_report():
+    """Classify a citizen photo/text and create a routed civic incident."""
+    data = request.get_json(silent=True) or {}
+    message = (data.get('message') or '').strip()
+    image = data.get('image')
+    try:
+        lat = float(data.get('lat') or CONFIG['DEFAULT_LAT'])
+        lng = float(data.get('lng') or CONFIG['DEFAULT_LNG'])
+    except (TypeError, ValueError):
+        lat, lng = CONFIG['DEFAULT_LAT'], CONFIG['DEFAULT_LNG']
+    classification = None
+    if _azure_config() and isinstance(image, str) and IMAGE_DATA_URL.match(image):
+        prompt = '''You are Bengaluru Civic Triage AI. Inspect this citizen report/photo and return ONLY valid JSON.
+Classify issue_type as exactly one of: pothole, road_damage, garbage, water_leak, flooding, streetlight, traffic_hazard, blocked_footpath, other.
+Return keys: issue_type, issue_label, risk (low/medium/high/critical), confidence (0 to 1), summary, safety_advice, recommended_action, evidence_match (match/mismatch/uncertain), evidence_match_note.
+Compare the user's written description with the visual evidence. If they disagree, use mismatch or uncertain and explain why. Never silently treat a mismatch as verified.
+Do not invent an exact address or claim that an authority has physically verified it.'''
+        try:
+            raw = _azure_chat_raw([{'role': 'system', 'content': prompt}, {'role': 'user', 'content': [
+                {'type': 'text', 'text': message or 'Classify this civic issue.'},
+                {'type': 'image_url', 'image_url': {'url': image, 'detail': 'high'}}
+            ]}], temperature=0.1, max_tokens=500)
+            content = raw.get('content') or '{}'
+            content = re.sub(r'^```(?:json)?\s*|\s*```$', '', content.strip(), flags=re.I)
+            classification = json.loads(content)
+        except Exception as exc:
+            logger.warning('Civic vision classification failed, using fallback: %s', exc)
+    if not classification:
+        classification = _fallback_civic_classification(message)
+    issue_type = classification.get('issue_type', 'other')
+    if issue_type not in DEPARTMENT_MAP:
+        issue_type = 'other'
+    classification['issue_type'] = issue_type
+    resolved = _reverse_location(lat, lng)
+    state = _state_from_coordinates(lat, lng, resolved)
+    civic_authority = STATE_CIVIC_PORTALS.get(state or 'default')
+    department_name = DEPARTMENT_MAP[issue_type]
+    if state == 'Puducherry':
+        department_name = {'garbage': 'Puducherry Local Administration / Commune Panchayat', 'water_leak': 'Puducherry Public Works Department', 'flooding': 'Puducherry Disaster Management', 'pothole': 'Puducherry Public Works Department'}.get(issue_type, 'Puducherry Local Administration')
+    elif state and state != 'Karnataka':
+        department_name = f"{state} local civic authority · {department_name}"
+    department = f"{civic_authority['authority']} · {department_name}"
+    now = datetime.now().isoformat()
+    location_label = resolved.get('label') or (data.get('location_label') or data.get('address') or f'{lat:.5f}, {lng:.5f}').strip()
+    incident = {
+        'id': f"{civic_authority['code']}-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}",
+        'issue_type': issue_type,
+        'issue_label': classification.get('issue_label') or issue_type.replace('_', ' ').title(),
+        'risk': classification.get('risk', 'medium'),
+        'confidence': classification.get('confidence', 0.6),
+        'summary': classification.get('summary') or message or 'Citizen civic report',
+        'safety_advice': classification.get('safety_advice') or 'Avoid the affected area if unsafe.',
+        'recommended_action': classification.get('recommended_action') or 'Inspect and assign a civic response team.',
+        'evidence_match': classification.get('evidence_match', 'uncertain'),
+        'evidence_match_note': classification.get('evidence_match_note', 'The AI compared the description with the attached evidence.'),
+        'next_action': 'The responsible department will review the evidence and assign a field team.',
+        'reported_at': now,
+        'progress_url': os.getenv('LOOKATE_PUBLIC_URL', 'http://localhost:5173') + '/?incident=',
+        'department': department,
+        'status': 'Submitted',
+        'lat': lat, 'lng': lng,
+        'address': location_label,
+        'state': state or 'Unknown',
+        'city': resolved.get('city') or '',
+        'area': resolved.get('area') or '',
+        'pincode': resolved.get('postcode') or '',
+        'civic_portal': civic_authority['portal'],
+        'created_at': now,
+        'timeline': [{'status': 'Submitted', 'at': now, 'note': f'Routed to {department}'}],
+        'phone_escalation': {'status': 'Not requested'}
+    }
+    if data.get('preview') is True:
+        incident['status'] = 'Preview only'
+        incident['whatsapp'] = {'status': 'not_sent_until_confirmation'}
+        return jsonify({'success': True, 'preview': True, 'incident': incident, 'message': 'AI analysis complete. Review the report before sending.'})
+    incident['whatsapp'] = {'status': 'pending'}
+    incidents = _load_civic_incidents()
+    incidents.append(incident)
+    _save_civic_incidents(incidents)
+    incident['whatsapp'] = _send_civic_whatsapp(incident)
+    _save_civic_incidents(incidents)
+    return jsonify({'success': True, 'incident': incident, 'message': f"Incident {incident['id']} submitted to {department}.", 'notification': incident['whatsapp']})
+
+@app.route('/api/civic/escalate', methods=['POST'])
+def civic_escalate():
+    """Create a phone escalation request and return an AI-ready call brief.
+
+    A real outbound call requires a configured telephony provider (for example
+    Twilio or IBM watsonx Assistant/Voice). This endpoint keeps the workflow
+    demonstrable and provides the exact provider payload to connect later.
+    """
+    data = request.get_json(silent=True) or {}
+    incident_id = data.get('incident_id')
+    incidents = _load_civic_incidents()
+    incident = next((x for x in incidents if x.get('id') == incident_id), None)
+    if not incident:
+        return jsonify({'success': False, 'error': 'Incident not found'}), 404
+    incident['phone_escalation'] = {
+        'status': 'Queued for civic response team',
+        'requested_at': datetime.now().isoformat(),
+        'call_brief': f"Urgent {incident['issue_label']} at {incident['address']}. Risk: {incident['risk']}. Incident: {incident['id']}."
+    }
+    incident['timeline'].append({'status': 'Phone escalation queued', 'at': incident['phone_escalation']['requested_at'], 'note': 'Awaiting configured telephony provider'})
+    _save_civic_incidents(incidents)
+    return jsonify({'success': True, 'incident': incident, 'message': 'Phone escalation queued. Connect a verified department number and telephony provider to place the call.'})
+
+@app.route('/api/civic/incidents/<incident_id>/status', methods=['POST'])
+def civic_update_status(incident_id):
+    """Officer/demo workflow for progressing an incident."""
+    data = request.get_json(silent=True) or {}
+    status = str(data.get('status') or '').strip()
+    allowed = {'Acknowledged', 'Assigned', 'In Progress', 'Resolved', 'Rejected'}
+    if status not in allowed:
+        return jsonify({'success': False, 'error': f'Status must be one of: {", ".join(sorted(allowed))}'}), 400
+    incidents = _load_civic_incidents()
+    incident = next((x for x in incidents if x.get('id') == incident_id), None)
+    if not incident:
+        return jsonify({'success': False, 'error': 'Incident not found'}), 404
+    now = datetime.now().isoformat()
+    incident['status'] = status
+    incident.setdefault('timeline', []).append({'status': status, 'at': now, 'note': data.get('note') or 'Updated by response team'})
+    incident['last_action'] = data.get('note') or f'Response team changed status to {status}.'
+    incident['whatsapp_status_update'] = _send_civic_status_whatsapp(incident, status, data.get('note'))
+    _save_civic_incidents(incidents)
+    return jsonify({'success': True, 'incident': incident})
 
 @app.route("/geocode", methods=['GET'])
 def geocode():

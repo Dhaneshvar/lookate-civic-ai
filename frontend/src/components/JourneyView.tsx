@@ -61,11 +61,11 @@ type VoiceState = 'idle' | 'listening' | 'thinking';
 type PanelState = 'open' | 'min' | 'closed';
 type Journey = { status: 'idle' | 'running' | 'paused' | 'done'; p: number };
 
-const DEFAULT_START: LatLng = [11.9416, 79.8083];
+const DEFAULT_START: LatLng = [12.9716, 77.5946];
 const TILES = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
 const TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
-const PHOTO_PROMPT = 'What is this? If it is food, find places near me that serve it. If it is a place, tell me about it and show it on the map.';
-const QUICK = ['Best cafes nearby', 'Optimize my itinerary', 'Sunset spots', 'Street food'];
+const PHOTO_PROMPT = 'Classify this Bengaluru civic issue, assess its risk, route it to the correct department and create an incident report.';
+const QUICK = ['Report a pothole', 'Check flooding nearby', 'Report garbage overflow', 'Find a safer route'];
 
 const readItinerary = () => {
   try {
@@ -107,6 +107,7 @@ const stopIcon = (n: number, visited: boolean, place: Place, hint: string) => {
     popupAnchor: [0, -22],
   });
 };
+const civicIcon = (risk: string) => L.divIcon({ className: '', html: `<div style="background:${risk === 'critical' || risk === 'high' ? '#dc2626' : '#f59e0b'};width:30px;height:30px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:3px solid white;box-shadow:0 2px 8px #0008;color:white;display:flex;align-items:center;justify-content:center;font-weight:700"><span style="transform:rotate(45deg)">!</span></div>`, iconSize: [30, 30], iconAnchor: [15, 30], popupAnchor: [0, -30] });
 
 function FitTo({ points, token }: { points: LatLng[]; token: number }) {
   const map = useMap();
@@ -154,7 +155,7 @@ interface Props {
 
 export default function JourneyView({ itineraryToken = 0 }: Props) {
   const [messages, setMessages] = useState<Message[]>([
-    { id: 1, sender: 'ai', time: now(), text: 'Tap the mic or type. Ask for places, food or a route and I will plot it on the map.' },
+    { id: 1, sender: 'ai', time: now(), text: 'Report a civic issue by voice, text or photo. I will classify it, create an incident number and pin it on the map.' },
   ]);
   const [input, setInput] = useState('');
   const [voice, setVoice] = useState<VoiceState>('idle');
@@ -165,6 +166,7 @@ export default function JourneyView({ itineraryToken = 0 }: Props) {
   const [error, setError] = useState('');
   const [start, setStart] = useState<LatLng>(DEFAULT_START);
   const [stops, setStops] = useState<Place[]>([]);
+  const [civicIncidents, setCivicIncidents] = useState<any[]>([]);
   const [route, setRoute] = useState<Route | null>(null);
   const [fitToken, setFitToken] = useState(0);
   const [journey, setJourney] = useState<Journey>({ status: 'idle', p: 0 });
@@ -318,7 +320,8 @@ export default function JourneyView({ itineraryToken = 0 }: Props) {
     let cards: CardItem[] = [];
     let sources: SourceItem[] = [];
     try {
-      const res = await fetch('/api/chat', {
+      const civicReport = !!attached || /\b(report|pothole|garbage|waste|flood|water leak|streetlight|footpath|road hazard|traffic hazard)\b/i.test(message);
+      const res = await fetch(civicReport ? '/api/civic/report' : '/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -333,8 +336,15 @@ export default function JourneyView({ itineraryToken = 0 }: Props) {
         }),
       });
       const data = await res.json();
-      if (!data.success || !data.response) throw new Error(data.error || 'Invalid response');
-      reply = data.response;
+      if (!data.success) throw new Error(data.error || 'Invalid response');
+      if (civicReport) {
+        const incident = data.incident;
+        setCivicIncidents(prev => [incident, ...prev.filter(i => i.id !== incident.id)]);
+        reply = `${data.message}\n\nIncident number: ${incident.id}\nIssue: ${incident.issue_label}\nRisk: ${incident.risk.toUpperCase()}\nDepartment: ${incident.department}\nLocation: ${incident.address}\nStatus: ${incident.status}\n\nNext: ${incident.next_action}\n\nWhatsApp notification: ${data.notification?.status === 'sent' ? 'sent to the configured citizen number.' : 'not configured or not sent.'}`;
+      } else {
+        if (!data.response) throw new Error('Invalid response');
+        reply = data.response;
+      }
       places = data.places || [];
       tools = data.tools || [];
       ordered = !!data.ordered;
@@ -442,11 +452,11 @@ export default function JourneyView({ itineraryToken = 0 }: Props) {
   const fitPoints = useMemo<LatLng[]>(() => [start, ...stops.map(s => [s.latitude, s.longitude] as LatLng)], [start, stops]);
   const orbScale = voice === 'listening' ? 'scale-110' : voice === 'thinking' ? 'scale-100 animate-pulse' : 'scale-90 opacity-80';
   const status =
-    voice === 'listening' ? ['Listening...', 'Ask about places, food or routes']
+    voice === 'listening' ? ['Listening...', 'Describe a civic issue or ask about nearby incidents']
     : voice === 'thinking' ? ['Thinking...', 'Asking the AI and searching Google Maps']
     : speaking ? ['Speaking...', 'Tap the speaker to stop']
     : journey.status === 'running' ? ['On your way', nextStop ? `Next: ${nextStop.title}` : 'Almost there']
-    : ['Ready', 'Tap the mic and ask about places, food or routes'];
+    : ['Ready', 'Report an issue or ask about civic incidents'];
 
   return (
     <div className="absolute inset-0">
@@ -466,6 +476,20 @@ export default function JourneyView({ itineraryToken = 0 }: Props) {
           <Marker position={start} icon={userIcon}>
             <Popup>{locStatus === 'ok' ? `You are here${accuracy !== null ? ` (within ${Math.round(accuracy)} m)` : ''}` : 'Default location. Your real location is not available yet.'}</Popup>
           </Marker>
+          {civicIncidents.map(incident => (
+            <Marker key={incident.id} position={[incident.lat, incident.lng]} icon={civicIcon(incident.risk)}>
+              <Popup>
+                <div className="space-y-1 min-w-[210px] text-slate-900">
+                  <p className="font-semibold">{incident.issue_label}</p>
+                  <p className="text-xs font-mono">{incident.id}</p>
+                  <p className="text-xs">{incident.risk?.toUpperCase()} risk · {incident.status}</p>
+                  <p className="text-xs">{incident.department}</p>
+                  <p className="text-xs">{incident.address}</p>
+                  <p className="text-xs mt-1">{incident.summary}</p>
+                </div>
+              </Popup>
+            </Marker>
+          ))}
           {route && (
             <>
               <Polyline positions={route.points} pathOptions={{ color: '#ffffff', weight: 10, opacity: 0.9 }} />
@@ -742,7 +766,7 @@ export default function JourneyView({ itineraryToken = 0 }: Props) {
                 )}
                 <form onSubmit={e => { e.preventDefault(); send(input); }}
                   className="flex items-center gap-1 rounded-full bg-white/10 border border-white/20 pl-4 pr-1.5 py-1.5 focus-within:border-cyan-300/60 transition-colors">
-                  <input value={input} onChange={e => setInput(e.target.value)} placeholder="Ask about places, food, routes..."
+          <input value={input} onChange={e => setInput(e.target.value)} placeholder="Report an issue or ask about Bengaluru..."
                     className="flex-1 min-w-0 bg-transparent text-sm text-white placeholder-blue-200/60 outline-none"
                     style={{ outline: 'none', boxShadow: 'none' }} />
                   <button type="button" onClick={() => setPhotoMenu(v => !v)} aria-label="Add a photo"
@@ -780,7 +804,7 @@ export default function JourneyView({ itineraryToken = 0 }: Props) {
           <p className="mt-1 text-sm text-blue-200/70 max-w-sm min-h-[20px]">
             {transcript
               ? `“${transcript}”`
-              : voice === 'listening' ? 'Ask about places, food or routes'
+              : voice === 'listening' ? 'Describe a civic issue or ask about nearby incidents'
               : voice === 'thinking' ? 'Asking the AI and searching Google Maps' : ''}
           </p>
           {error && <p className="mt-3 text-sm text-rose-300 max-w-sm">{error}</p>}

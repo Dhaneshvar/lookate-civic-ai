@@ -13,7 +13,7 @@ const FEATURES = [
   {
     icon: Mic,
     title: 'Voice-first AI concierge',
-    text: 'Just talk. Ask for cafes, sunset spots or a heritage walk and get a natural answer, spoken back to you. Powered by Azure OpenAI.',
+    text: 'Speak naturally about a civic problem and get an AI-routed incident, safety guidance and a trackable response. Powered by Azure OpenAI.',
   },
   {
     icon: Search,
@@ -37,8 +37,8 @@ const FEATURES = [
   },
   {
     icon: ListChecks,
-    title: 'Smart itinerary optimizer',
-    text: 'Keep a to-do list of places and the AI reads it. Say "optimize my itinerary" and it reorders the stops to cut travel time, then draws the route on the map.',
+    title: 'Civic incident dashboard',
+    text: 'See reported potholes, garbage, flooding, water leaks and hazards on a live map with risk, department and response status.',
   },
 ];
 
@@ -65,25 +65,24 @@ export default function HomePage({ onLaunch, onItinerary }: Props) {
             <LogoMark size={60} className="drop-shadow-[0_8px_24px_rgba(37,99,235,0.55)]" />
             <Wordmark className="text-3xl" />
           </div>
-          <span className="inline-flex items-center gap-2 rounded-full bg-white/10 border border-white/15 px-3 py-1 text-xs font-medium text-cyan-200">
-            <Sparkles className="w-3.5 h-3.5" /> Built for the SerpAPI India Hackathon 2026
+            <span className="inline-flex items-center gap-2 rounded-full bg-white/10 border border-white/15 px-3 py-1 text-xs font-medium text-cyan-200">
+            <Sparkles className="w-3.5 h-3.5" /> Built for IBM Bobathon · Smarter Streets, Better Living
           </span>
           <h1 className="mt-4 text-4xl md:text-6xl font-bold leading-[1.05] tracking-tight">
-            Talk to your trip.
+            Report a problem.
             <span className="block bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent">
-              Watch it appear on the map.
+              Watch Bengaluru respond.
             </span>
           </h1>
           <p className="mt-5 text-base md:text-lg text-blue-100/80 max-w-xl">
-            LookAte is a voice-first AI travel companion. Ask about places, food or routes. It finds real
-            places live, plots them on a map, draws the route and starts your journey.
+            LookAte Civic turns a citizen photo or voice report into a classified, risk-scored and department-routed civic incident—with a trackable incident number and safer next steps.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <button
               onClick={onLaunch}
               className="group inline-flex items-center gap-2 px-6 py-3.5 rounded-full bg-gradient-to-r from-blue-500 to-cyan-500 font-semibold text-white shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 hover:scale-[1.03] transition-all"
             >
-              Launch LookAte
+              Open Civic AI
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </button>
             <a href="#how" className="inline-flex items-center px-6 py-3.5 rounded-full bg-white/10 border border-white/20 font-semibold text-white hover:bg-white/15 transition-colors">
@@ -100,7 +99,7 @@ export default function HomePage({ onLaunch, onItinerary }: Props) {
         >
           <div className="absolute w-72 h-72 rounded-full bg-cyan-500/30 blur-3xl" />
           <FluidOrb size={260} color="#1A73F2" className="relative shadow-[0_0_90px_rgba(6,182,212,0.5)]" />
-          {['“Best cafes near me”', '“Plan a heritage walk”', '“Where is good street food?”'].map((t, i) => (
+          {['“Report this pothole”', '“Is this road flooded?”', '“Garbage is overflowing here”'].map((t, i) => (
             <motion.span
               key={t}
               animate={{ y: [0, -8, 0] }}
@@ -139,8 +138,8 @@ export default function HomePage({ onLaunch, onItinerary }: Props) {
             onClick={onItinerary}
             className="rounded-2xl border border-dashed border-cyan-300/40 p-5 text-left text-cyan-200 hover:bg-cyan-500/10 transition-colors flex flex-col justify-center"
           >
-            <span className="font-semibold">Try the itinerary optimizer</span>
-            <span className="text-sm text-blue-100/70 mt-1 flex items-center gap-1">Open it now <ArrowRight className="w-4 h-4" /></span>
+            <span className="font-semibold">Open Civic Plus dashboard</span>
+            <span className="text-sm text-blue-100/70 mt-1 flex items-center gap-1">View live incidents <ArrowRight className="w-4 h-4" /></span>
           </motion.button>
         </div>
       </section>
@@ -172,7 +171,7 @@ export default function HomePage({ onLaunch, onItinerary }: Props) {
           onClick={onLaunch}
           className="mt-10 inline-flex items-center gap-2 px-8 py-4 rounded-full bg-gradient-to-r from-blue-500 to-cyan-500 font-semibold text-white shadow-lg shadow-blue-500/30 hover:scale-[1.03] transition-transform"
         >
-          Launch LookAte <ArrowRight className="w-4 h-4" />
+          Open Civic AI <ArrowRight className="w-4 h-4" />
         </button>
       </section>
     </div>

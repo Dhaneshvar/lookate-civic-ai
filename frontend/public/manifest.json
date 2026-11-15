@@ -1,7 +1,7 @@
 {
-  "name": "LookAte - AI Travel Guide",
-  "short_name": "LookAte",
-  "description": "Discover authentic local places with AI-powered recommendations using real-time SerpAPI data",
+  "name": "LookAte Civic Plus",
+  "short_name": "LookAte Civic",
+  "description": "AI-powered civic incident reporting and tracking for Bengaluru and India",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -43,15 +43,16 @@
     }
   ],
   "categories": [
-    "travel",
-    "lifestyle"
+    "public safety",
+    "utilities",
+    "government"
   ],
   "shortcuts": [
     {
-      "name": "Chat with AI",
-      "short_name": "Chat",
-      "description": "Start chatting with your AI travel guide",
-      "url": "/?tab=chat",
+      "name": "Civic AI",
+      "short_name": "Civic AI",
+      "description": "Report civic issues using voice or chat",
+      "url": "/?view=civic-ai",
       "icons": [
         {
           "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'><rect fill='%232563eb' width='96' height='96'/><text x='48' y='48' font-size='60' dominant-baseline='middle' text-anchor='middle'>💬</text></svg>",
@@ -61,10 +62,10 @@
       ]
     },
     {
-      "name": "Explore Places",
-      "short_name": "Explore",
-      "description": "Discover nearby attractions and restaurants",
-      "url": "/?tab=explore",
+      "name": "Civic Plus",
+      "short_name": "Report",
+      "description": "Submit and track civic incidents",
+      "url": "/?view=civic-plus",
       "icons": [
         {
           "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'><rect fill='%238b5cf6' width='96' height='96'/><text x='48' y='48' font-size='60' dominant-baseline='middle' text-anchor='middle'>🗺️</text></svg>",

@@ -1,178 +1,206 @@
-# LookAte: AI Travel Guide
+# LookAte Civic Plus
 
-**Talk to your trip. Watch it appear on the map.**
+AI-powered civic incident reporting and tracking for Bengaluru and India.
 
-LookAte is a voice-first AI travel companion built for the **SerpAPI India Hackathon 2026**. Ask about places, food or routes by typing, speaking, or snapping a photo. An Azure OpenAI model decides which **SerpAPI** services to call, answers in plain language, and plots the results on a live map with a route you can follow.
+LookAte Civic Plus lets citizens capture live photos with GPS, upload multiple existing photos, or describe civic issues by voice or text. Azure OpenAI analyzes the evidence, compares the image with the description, classifies risk, identifies the responsible department and prepares a report for citizen confirmation.
 
-## What it does
+## Core workflow
 
-- **Ask in your own words** by typing or by voice ("best dosa places near me", "how far is Promenade Beach?").
-- **Snap or upload a photo** of a dish, a landmark or a menu. The AI works out what it is, then finds nearby places, photos, reviews and facts.
-- **The AI picks the tools.** It calls live SerpAPI services only when the question needs them, then explains the results in natural language.
-- **Everything lands on the map.** Places appear as numbered markers with a type icon (supermarket, mall, fuel pump, hospital, salon, restaurant, house and more). Hover for details, click for a popup.
-- **Start a journey.** The road route, distance and time are drawn, and a marker travels along it stop by stop.
-- **Itinerary optimizer.** Keep a to-do list of places; the AI can read it and reorder the stops for the shortest trip.
-- **Installable on a phone** (Add to Home Screen), with location, microphone and camera support over HTTPS.
+```text
+Photo / voice / text
+        ↓
+GPS or manual map pin
+        ↓
+Azure OpenAI evidence analysis
+        ↓
+Issue, risk, confidence and evidence-match preview
+        ↓
+Citizen selects Confirm & Send
+        ↓
+State-aware department routing
+        ↓
+Incident number, map marker and WhatsApp update
+```
 
-## How SerpAPI is used
+The app never sends a report or WhatsApp notification during preview. The citizen confirms the AI-generated report first.
 
-The AI model is given six tools. Five are backed by SerpAPI engines; the sixth builds on the first.
+## Features
 
-| SerpAPI engine | Tool the AI can call | What the user sees | Code (`backend/app.py`) |
-|---|---|---|---|
-| `google_maps` | `search_places` | Numbered, icon markers on the map, ratings, open status | `SerpApiClient.search_google_maps`, `_tool_search_places` |
-| `google_maps_directions` | `get_directions` | Distance and time by car and two-wheeler | `_serp_directions`, `_tool_get_directions` |
-| `google_images` | `search_images` | A photo strip in the chat | `_tool_search_images` |
-| `tripadvisor` | `tripadvisor_search` | Rating and review cards (restaurants, hotels, things to do) | `_tool_tripadvisor_search` |
-| `google_ai_mode` | `web_answer` | A web-grounded answer with source links | `_tool_web_answer` |
-| `google_maps` (resolves each stop) | `optimize_itinerary` | The stops reordered for the shortest trip | `_tool_optimize_itinerary` |
-
-All SerpAPI calls go through one small function, `_serp`. The tool loop is `_run_concierge`, and the chat endpoint is `ai_chat`.
+- Live camera mode with continuous GPS tracking
+- Upload mode for up to five existing photos
+- Manual map pin selection
+- Reverse geocoding for area, city, state and pincode
+- Azure OpenAI vision classification
+- Evidence comparison between the image and user description
+- Issue type, risk level and confidence chips
+- State-aware civic authority and department routing
+- Dynamic incident numbers such as `PY-20261116-ABC123` and `KA-20261116-ABC123`
+- Issue-specific map markers and clickable incident details
+- WhatsApp report and status notifications through Twilio
+- Public incident tracking links
+- Officer view with city-wise counts and status updates
+- Civic AI chat for safety guidance, nearby incidents and safer routes
+- Installable mobile PWA with camera, microphone and GPS support
 
 ## Architecture
 
+```text
+React + Leaflet PWA
+  ├─ Civic AI chat
+  ├─ Civic Plus reporting form
+  ├─ GPS, camera and map pin
+  ├─ Incident map and officer view
+  └─ WhatsApp tracking links
+             │
+             ▼
+Flask civic orchestration API
+  ├─ Azure OpenAI vision and classification
+  ├─ Reverse geocoding
+  ├─ State and department router
+  ├─ Preview and Confirm & Send workflow
+  ├─ Incident timeline and status API
+  └─ Twilio WhatsApp adapter
+             │
+             ├─ OpenStreetMap / Nominatim
+             ├─ SerpAPI Maps and Directions
+             ├─ Twilio WhatsApp
+             └─ Government portal or email adapter
 ```
- Browser (React + Leaflet)                     Flask backend                       Services
- ┌──────────────────────────┐   /api/chat   ┌──────────────────────┐
- │ chat, voice, photo input │ ────────────► │ ai_chat()            │ ───► Azure OpenAI (GPT-4o, vision)
- │ map, route, journey      │               │  _run_concierge()    │ ◄─── "call search_images(...)"
- │ itinerary (localStorage) │ ◄──────────── │   runs the tools     │ ───► SerpAPI: Maps, Directions, Images,
- └──────────────────────────┘  answer +     └──────────────────────┘      Tripadvisor, AI Mode
-        │                      places,                                          
-        │ road routes          photos, cards,
-        ▼                      sources
-   OSRM routing, OpenStreetMap tiles
-```
 
-One question, step by step:
+## Technology
 
-1. The browser sends the message, your location, the places already on the map, your saved itinerary and, optionally, a photo.
-2. Azure OpenAI reads it and either answers directly or asks for one or more tools.
-3. The backend runs those tools against SerpAPI and gives the results back to the model.
-4. The model writes the final answer using only what the tools returned (it is told never to invent ratings, addresses or opening hours).
-5. The backend returns the answer plus structured `places`, `images`, `cards`, `sources` and the list of tools used. The UI shows them as chips, photo strips and cards, and plots the places on the map.
+- React, TypeScript, Vite, Tailwind CSS and Leaflet
+- Python, Flask and Flask-CORS
+- Azure OpenAI vision-capable deployment
+- SerpAPI, OpenStreetMap, Nominatim and OSRM
+- Twilio WhatsApp REST API
+- Web App Manifest and service worker
+- IBM Bob development copilot
 
-## Quick start
+## Local setup
 
-You need **Python 3.10+**, **Node 18+**, a **SerpAPI key**, and an **Azure OpenAI** resource with a **vision-capable chat deployment** (for example `gpt-4o`).
+Requirements: Python 3.10+, Node 18+, Azure OpenAI credentials and SerpAPI credentials.
 
-### 1. Backend
+### Backend
 
-```bash
+```powershell
 cd backend
 python -m venv .venv
-# Windows: .venv\Scripts\activate      macOS/Linux: source .venv/bin/activate
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 pip install -r requirements.txt
-cp .env.example .env        # Windows: copy .env.example .env
-# edit .env and fill in your keys (see the table below)
-python app.py               # runs on http://localhost:5000
+Copy-Item .env.example .env
+python app.py
 ```
 
-| Variable | Purpose |
-|---|---|
-| `SERPAPI_KEY` | SerpAPI key (Maps, Directions, Images, Tripadvisor, AI Mode) |
-| `AZURE_OPENAI_ENDPOINT` | e.g. `https://your-resource.openai.azure.com` |
-| `AZURE_OPENAI_API_KEY` | Azure OpenAI key |
-| `AZURE_OPENAI_DEPLOYMENT` | Name of a vision-capable chat deployment |
-| `AZURE_OPENAI_API_VERSION` | Defaults to `2025-01-01-preview` |
-| `SERPAPI_GL`, `SERPAPI_GOOGLE_DOMAIN` | Optional. Default `in` and `google.co.in` |
-| `PORT` | Optional. Default `5000` |
+Health check: `http://localhost:5000/api/health`
 
-Check it is configured: open `http://localhost:5000/api/health`. It should show `serpapi_connected` and `azure_openai_connected` as `true`.
+### Frontend
 
-### 2. Frontend
+Open another terminal:
 
-```bash
+```powershell
 cd frontend
 npm install
-npm run dev                 # http://localhost:5173, proxies /api to the backend on port 5000
+npm run dev
 ```
 
-Open `http://localhost:5173` and press **Launch LookAte**.
+Open `http://localhost:5173`.
 
-### 3. Prove every SerpAPI service works (about 9 search credits)
+## Environment variables
 
-```bash
-cd backend
-python check_serpapi.py
+Never commit `backend/.env` or expose secret values.
+
+```env
+SERPAPI_KEY=your_serpapi_key
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
+AZURE_OPENAI_API_KEY=your_azure_openai_key
+AZURE_OPENAI_DEPLOYMENT=your_vision_capable_deployment
+AZURE_OPENAI_API_VERSION=2025-01-01-preview
+
+# Optional Twilio WhatsApp notifications
+TWILIO_ACCOUNT_SID=your_twilio_account_sid
+TWILIO_AUTH_TOKEN=your_twilio_auth_token
+TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
+TWILIO_WHATSAPP_TO=whatsapp:+919876543210
+LOOKATE_PUBLIC_URL=https://your-public-lookate-url
 ```
 
-It makes one live call per service and prints what each tool extracted. It never prints your key.
+## Important endpoints
 
-## Try it: demo prompts
-
-| Say or type | Service you will see in the chat chip |
+| Endpoint | Purpose |
 |---|---|
-| "Find good dosa places near me" | Google Maps, plotted on the map |
-| "Show me what a masala dosa looks like" | Google Images (photo strip) |
-| "Which restaurants here have the best reviews?" | Tripadvisor (rating cards) |
-| "What is the best time to visit Pondicherry?" | Google AI Mode (answer plus sources, about 10 to 15 seconds) |
-| "How far is Promenade Beach?" | Google Maps Directions |
-| Upload a photo of a dish | Vision, then Maps / Images |
-| "Optimize my itinerary" | Itinerary optimizer |
+| `GET /api/health` | Check Azure and SerpAPI configuration |
+| `POST /api/chat` | Civic AI assistant and safer route guidance |
+| `POST /api/civic/report` | Analyze, preview or confirm a civic report |
+| `GET /api/civic/incidents` | Load incident board and map data |
+| `POST /api/civic/incidents/{id}/status` | Officer status update |
+| `POST /api/civic/escalate` | Queue phone escalation |
 
-Each answer shows chips naming the SerpAPI services that ran. After places are plotted, press **Start journey**.
+## State-aware routing
 
-## Use it on a phone (location and microphone need HTTPS)
+The backend reverse-geocodes the submitted coordinates instead of trusting a stale frontend label. It derives the actual state, city, area and pincode, then selects the relevant civic authority metadata.
 
-Browsers only allow location and microphone on HTTPS. The quickest way is a free Cloudflare quick tunnel:
+Examples include Karnataka and BBMP services, Puducherry local administration, Tamil Nadu civic services and a national grievance fallback for other locations. Direct government submission requires an official API, approved webhook or configured email integration. The prototype prepares the correct state-specific report and portal link without falsely claiming external acceptance.
 
-```bash
-cloudflared tunnel --url http://localhost:5173
-```
+## WhatsApp updates
 
-Open the `https://….trycloudflare.com` address on your phone and allow location, microphone and camera. `vite.config.ts` already allows `*.trycloudflare.com`. The tunnel address is public while it runs, so do not share it: anyone with it can use your API keys.
+After confirmation, the citizen can receive the incident number, report time, location, issue, risk, department, status, next action, safety advice, progress link and state portal link.
 
-## Tests
-
-No real keys and no network needed. They use a stand-in for Azure OpenAI and canned SerpAPI replies.
-
-```bash
+```powershell
 cd backend
-python tests/test_agent_tools.py         # tool loop, itinerary, photo input, error handling
-python tests/test_azure_sdk_path.py      # real Azure SDK request shape against a local fake server
+.\.venv\Scripts\Activate.ps1
+python send_whatsapp.py --incident PY-20261116-ABC123
 ```
 
-If you are behind a proxy, set `NO_PROXY=127.0.0.1,localhost` first.
+The recipient must join the Twilio Sandbox during testing. Production requires an approved WhatsApp sender and message templates.
 
-## Project structure
+## Public tracking
 
-```
-backend/
-  app.py               Flask API, SerpAPI tools, Azure OpenAI tool-calling loop
-  check_serpapi.py     Live smoke test for every SerpAPI service
-  tests/               Offline tests
-  requirements.txt
-  .env.example
-frontend/
-  src/pages/Index.tsx           App shell and tabs
-  src/components/HomePage.tsx   Landing page
-  src/components/JourneyView.tsx  Map, AI chat, voice, photo input, journey
-  src/components/TodoSection.tsx  Itinerary list and optimizer
-  src/lib/route.ts              Route building (OSRM) and journey position
-  src/lib/placeKind.tsx         Place type to icon and color
-  src/lib/image.ts              Shrinks photos before upload
+After deployment, a citizen can open:
+
+```text
+https://your-public-lookate-url/?incident=PY-20261116-ABC123
 ```
 
-## Notes and limits
+The app displays the incident details and progress timeline. Production deployments should replace the local JSON store with durable database storage.
 
-- **Live data needed for real results.** If SerpAPI cannot be reached, the place tools fall back to a small built-in Pondicherry list. The AI is told this and says so, and the chip is labelled "Demo data".
-- **Tripadvisor results have no coordinates.** They appear as cards. To put one on the map the AI also searches Google Maps for it.
-- **Google AI Mode is slow** (roughly 10 to 15 seconds), so answers that use it take longer.
-- **Each answer can use 1 to 4 SerpAPI searches.** Watch your quota.
-- **Routes** come from the free public OSRM server (driving only). If it is unreachable, a dashed straight-line estimate is drawn instead.
-- **Voice** uses the browser's speech recognition. It works best in Chrome on desktop and Android; Safari support is limited.
-- **Photo input** needs an Azure deployment that supports images (such as `gpt-4o`).
-- The saved itinerary lives in the browser (`localStorage`), not on the server.
+## Demo flow
 
-## Credits
+1. Open Civic Plus and select Live camera + GPS or Upload photos.
+2. Capture a pothole, garbage, flood or water-leak image.
+3. Confirm or adjust the map pin and add a description.
+4. Select Analyse & preview.
+5. Review issue, risk, confidence and evidence-match chips.
+6. Select Confirm & Send.
+7. Show the incident number and map marker.
+8. Show the WhatsApp report.
+9. Open Officer view and change the status.
+10. Show the status-update WhatsApp message.
 
-- Search data and tools: [SerpAPI](https://serpapi.com)
-- Language and vision model: Azure OpenAI
-- Map data: OpenStreetMap contributors; routing: OSRM; place lookups for city names: Nominatim
-- The animated voice orb (`frontend/src/components/ui/fluid-orb.tsx`) is the open FluidOrb component from [RareUI](https://www.rareui.com/components)
-- Icons: [Lucide](https://lucide.dev); UI primitives from shadcn/ui
+## IBM Bob build story
 
-## Security
+See [IBM_BOB_BUILD_STORY.md](IBM_BOB_BUILD_STORY.md) for the Bob prompts, development journey, feature traceability and demo narration. Bob supported repository analysis, civic schema design, Azure vision integration, routing, dashboard development, WhatsApp readiness and testing.
 
-Never commit `.env`. It is in `.gitignore`; use `backend/.env.example` as the template.
+## Testing
+
+```powershell
+cd backend
+python -m py_compile app.py send_whatsapp.py
+python tests/test_agent_tools.py
+python tests/test_azure_sdk_path.py
+```
+
+## Safety and limitations
+
+- AI classification assists human review, especially for high-risk cases.
+- The app does not claim government acceptance without an official integration response.
+- Real phone calls require a verified telephony provider and department number.
+- Camera, microphone and GPS require permission and HTTPS on deployed devices.
+- The local JSON incident store is suitable for a prototype; production needs durable storage.
+
+## IBM Bobathon positioning
+
+**LookAte Civic Plus turns a citizen’s photo or voice observation into a verified, location-aware and trackable civic action.**
+
+Built for IBM Bobathon: **Smarter Streets, Better Living**.
